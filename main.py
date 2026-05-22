@@ -223,13 +223,7 @@ async def on_done(update, context):
 
     # Send confirmation reply in the group
     action = state["last_alerted_action"] or ""
-    if action.startswith("jb:"):
-        n = action.split(":")[1]
-        reply_text = f"{n}g donné par {display_name}"
-    elif action == "juicebox":
-        reply_text = f"Jus donné par {display_name}"
-    else:
-        reply_text = f"Fait - {display_name}"
+    reply_text = tg.format_ack_message(action, display_name)
     try:
         await context.bot.send_message(
             chat_id=config.TELEGRAM_GROUP_ID,
@@ -326,7 +320,7 @@ async def on_dose(update, context):
 
     text = " ".join(context.args).strip()
     if not text:
-        await update.message.reply_text("Please tell me what Senna needs.")
+        await update.message.reply_text(tg.format_parent_reply("please_tell"))
         return
 
     user = update.effective_user
@@ -335,25 +329,21 @@ async def on_dose(update, context):
     action = await parse_dose_intent(text)
 
     if action is None:
-        await update.message.reply_text(
-            "Sorry, I don't understand. Please reply with what Senna needs."
-        )
+        await update.message.reply_text(tg.format_parent_reply("dont_understand"))
         return
 
     if action == "clear":
         state["override"] = None
         state["active_action"] = None
-        await update.message.reply_text("Override cleared.")
+        await update.message.reply_text(tg.format_parent_reply("override_cleared"))
         log.info(f"Override cleared by {username} via /dose")
         return
 
     success = await trigger_immediate_alert(update.get_bot(), action, username)
     if success:
-        await update.message.reply_text(f"Sending alert: {action}")
+        await update.message.reply_text(tg.format_parent_reply("sending_alert", action=action))
     else:
-        await update.message.reply_text(
-            "Override set but no BG data available yet - alert will fire on next poll."
-        )
+        await update.message.reply_text(tg.format_parent_reply("override_set_no_data"))
         state["override"] = {"action": action, "triggered_by": username}
 
 
@@ -365,7 +355,7 @@ async def on_override(update, context):
 
     text = " ".join(context.args).strip()
     if not text:
-        await update.message.reply_text("Please tell me what Senna needs.")
+        await update.message.reply_text(tg.format_parent_reply("please_tell"))
         return
 
     user = update.effective_user
@@ -374,25 +364,21 @@ async def on_override(update, context):
     action = await parse_dose_intent(text)
 
     if action is None:
-        await update.message.reply_text(
-            "Sorry, I don't understand. Please reply with what Senna needs."
-        )
+        await update.message.reply_text(tg.format_parent_reply("dont_understand"))
         return
 
     if action == "clear":
         state["override"] = None
         state["active_action"] = None
-        await update.message.reply_text("Override cleared.")
+        await update.message.reply_text(tg.format_parent_reply("override_cleared"))
         log.info(f"Override cleared by {username} via /override")
         return
 
     success = await trigger_immediate_alert(update.get_bot(), action, username)
     if success:
-        await update.message.reply_text(f"Sending alert: {action}")
+        await update.message.reply_text(tg.format_parent_reply("sending_alert", action=action))
     else:
-        await update.message.reply_text(
-            "Override set but no BG data available yet - alert will fire on next poll."
-        )
+        await update.message.reply_text(tg.format_parent_reply("override_set_no_data"))
         state["override"] = {"action": action, "triggered_by": username}
 
 
@@ -403,7 +389,7 @@ async def on_status(update, context):
 
     data = state["last_bg_data"]
     if data is None:
-        await update.message.reply_text("No BG data available yet - waiting for first poll.")
+        await update.message.reply_text(tg.format_parent_reply("no_bg_data"))
         return
 
     now = time.time()

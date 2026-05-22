@@ -1,5 +1,8 @@
 """Message formatting helpers for the Telegram group and parent private chats."""
 
+GROUP_LANG = "fr"
+PARENT_LANG = "en"
+
 
 def format_alert_message(action, data, *, is_repeat=False, is_override=False):
     """Return the full alert message string for the group chat."""
@@ -36,6 +39,30 @@ def format_alert_message(action, data, *, is_repeat=False, is_override=False):
     )
 
     return f"{header}\n\n{body_line}\n\n{body}"
+
+
+def format_parent_reply(key, **kwargs):
+    """Return an English string for parent private chat replies."""
+    strings = {
+        "sending_alert": "Sending alert: {action}",
+        "override_cleared": "Override cleared.",
+        "no_bg_data": "No BG data available yet - waiting for first poll.",
+        "please_tell": "Please tell me what Senna needs.",
+        "dont_understand": "Sorry, I don't understand. Please reply with what Senna needs.",
+        "override_set_no_data": "Override set but no BG data available yet - alert will fire on next poll.",
+    }
+    return strings[key].format(**kwargs)
+
+
+def format_ack_message(action, display_name):
+    """Return a French acknowledgement string for the group chat."""
+    if action.startswith("jb:"):
+        n = action.split(":")[1]
+        return f"{n}g donné par {display_name}"
+    elif action == "juicebox":
+        return f"Jus donné par {display_name}"
+    else:
+        return f"Fait - {display_name}"
 
 
 def format_status_message(state, data, cooldown_remaining_seconds=None):
