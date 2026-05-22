@@ -70,9 +70,9 @@ def get_bg_range(bg_mmol):
         return "very_low"
     elif bg_mmol <= 4.8:
         return "low"
-    elif bg_mmol <= 8.0:
+    elif bg_mmol <= 7.0:
         return "target"
-    elif bg_mmol < 11.0:
+    elif bg_mmol <= 10.0:
         return "high"
     elif bg_mmol <= 13.0:
         return "very_high"
