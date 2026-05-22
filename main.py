@@ -66,7 +66,7 @@ async def _send_alert(bot, action, data, *, is_repeat=False):
         action, data, is_repeat=is_repeat, is_override=is_override
     )
     keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("✅ Done", callback_data="done")]]
+        [[InlineKeyboardButton("✅ Fait", callback_data="done")]]
     )
 
     # Telegram send is critical - let exception propagate so the caller can log it
@@ -119,6 +119,9 @@ async def bg_poll(context):
     effective_action = (
         state["override"]["action"] if state["override"] else chart_action
     )
+
+    if effective_action == "water":
+        effective_action = ""
 
     now = time.time()
     cooldown_active = (
@@ -222,13 +225,11 @@ async def on_done(update, context):
     action = state["last_alerted_action"] or ""
     if action.startswith("jb:"):
         n = action.split(":")[1]
-        reply_text = f"{n}g given by {display_name}"
-    elif action == "water":
-        reply_text = f"Water given by {display_name}"
+        reply_text = f"{n}g donné par {display_name}"
     elif action == "juicebox":
-        reply_text = f"Juice box given by {display_name}"
+        reply_text = f"Jus donné par {display_name}"
     else:
-        reply_text = f"Done - {display_name}"
+        reply_text = f"Fait - {display_name}"
     try:
         await context.bot.send_message(
             chat_id=config.TELEGRAM_GROUP_ID,

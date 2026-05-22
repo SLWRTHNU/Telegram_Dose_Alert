@@ -10,20 +10,17 @@ def format_alert_message(action, data, *, is_repeat=False, is_override=False):
 
     if action.startswith("jb:"):
         n = action.split(":")[1]
-        label = f"[Low BG] Give {n}x 🍬"
-        body_line = f"Senna needs {n}g"
-    elif action == "water":
-        label = "[High BG] Drink 💧"
-        body_line = "Senna needs water"
+        label = f"[BG basse] Donner {n}x 🍬"
+        body_line = f"Senna a besoin de {n}g"
     elif action == "juicebox":
-        label = "[URGENT] Give 🧃"
-        body_line = "Senna needs juice box immediately"
+        label = "[URGENT] Donner 🧃"
+        body_line = "Senna a besoin d'un jus immédiatement"
     else:
         label = f"[Alert] {action}"
         body_line = action
 
     if is_repeat:
-        header = f"{label}\n(Repeat request)"
+        header = f"{label}\n(Demande répétée)"
     else:
         header = label
 
