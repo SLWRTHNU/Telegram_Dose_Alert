@@ -1,0 +1,14 @@
+[Unit]
+Description=Senna Dose Alert Bot
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/dose-alert
+ExecStart=/opt/dose-alert/venv/bin/python main.py
+Restart=always
+RestartSec=10
+EnvironmentFile=/opt/dose-alert/.env
+
+[Install]
+WantedBy=multi-user.target
