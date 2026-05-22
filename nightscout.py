@@ -1,4 +1,5 @@
 import logging
+import time
 
 import requests
 
@@ -47,7 +48,6 @@ def fetch_bg():
     delta = (current["sgv"] - prev["sgv"]) / 18.0
     direction = current.get("direction", "Flat")
 
-    import time
     reading_age_min = (time.time() - current["date"] / 1000) / 60
     if reading_age_min > 15:
         log.warning(

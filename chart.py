@@ -1,5 +1,6 @@
-# BG range boundaries (mmol/L). Gaps in the spec (7.0-8.0 and 10.0-11.0)
-# are absorbed into the adjacent lower range so every reading maps to an action.
+# BG range boundaries (mmol/L).
+# Ranges: very_low <=4.0, low 4.1-4.8, target 4.9-7.0,
+# high 8.0-10.0, very_high 11.0-13.0, critical 13.1+
 
 _TREND_CATEGORY = {
     "DoubleUp": "rising_rapidly",
