@@ -38,6 +38,8 @@ state = {
     "current_sheet_row": None,       # int | None - 1-based sheet row of live alert
     "last_alert_time": None,         # float | None - when last alert was sent
     "last_bg_data": None,            # dict | None - most recent fetch result
+    "paused": False,                 # bool - whether alerts are paused
+    "pause_until": None,             # float | None - unix timestamp to auto-resume
 }
 
 # ---------------------------------------------------------------------------
@@ -113,6 +115,17 @@ async def bg_poll(context):
         state["last_bg_data"] = data
     except Exception:
         log.error("Failed to fetch BG from Nightscout", exc_info=True)
+        return
+
+    # Check if timed pause has expired
+    if state["paused"] and state["pause_until"] is not None:
+        if time.time() >= state["pause_until"]:
+            state["paused"] = False
+            state["pause_until"] = None
+            log.info("Pause expired - resuming alerts")
+
+    # Skip alert logic if paused
+    if state["paused"]:
         return
 
     chart_action = chart.get_action(data["bg"], data["direction"])
@@ -382,6 +395,70 @@ async def on_override(update, context):
         state["override"] = {"action": action, "triggered_by": username}
 
 
+async def on_pause(update, context):
+    """Handle /pause [duration] from authorized parents."""
+    if not _is_parent(update):
+        return
+
+    import re
+    args = context.args
+    user = update.effective_user
+    username = user.username or user.first_name or str(user.id)
+
+    pause_until = None
+    duration_str = None
+
+    if args:
+        raw = args[0].strip().lower()
+        match = re.fullmatch(r'(?:(\d+)h)?(?:(\d+)m)?', raw)
+        if match and (match.group(1) or match.group(2)):
+            hours = int(match.group(1) or 0)
+            minutes = int(match.group(2) or 0)
+            total_seconds = hours * 3600 + minutes * 60
+            if total_seconds > 0:
+                pause_until = time.time() + total_seconds
+                if hours and minutes:
+                    duration_str = f"{hours}h {minutes}m"
+                elif hours:
+                    duration_str = f"{hours}h"
+                else:
+                    duration_str = f"{minutes}m"
+
+        if pause_until is None:
+            await update.message.reply_text(tg.format_parent_reply("pause_invalid"))
+            return
+
+    state["paused"] = True
+    state["pause_until"] = pause_until
+
+    if duration_str:
+        await update.message.reply_text(
+            tg.format_parent_reply("paused_until", duration=duration_str)
+        )
+        log.info(f"Alerts paused for {duration_str} by {username}")
+    else:
+        await update.message.reply_text(tg.format_parent_reply("paused_indefinite"))
+        log.info(f"Alerts paused indefinitely by {username}")
+
+
+async def on_resume(update, context):
+    """Handle /resume from authorized parents."""
+    if not _is_parent(update):
+        return
+
+    user = update.effective_user
+    username = user.username or user.first_name or str(user.id)
+
+    if not state["paused"]:
+        await update.message.reply_text(tg.format_parent_reply("not_paused"))
+        return
+
+    state["paused"] = False
+    state["pause_until"] = None
+    await update.message.reply_text(tg.format_parent_reply("resumed"))
+    log.info(f"Alerts resumed by {username}")
+
+
 async def on_status(update, context):
     """Handle /status from authorized parents."""
     if not _is_parent(update):
@@ -412,6 +489,9 @@ async def on_help(update, context):
         "/dose <what Senna needs> - send a dose request (e.g. /dose 2 jellybeans)\n"
         "/override <what Senna needs> - same as /dose\n"
         "/dose clear - cancel current override\n"
+        "/pause - pause all alerts indefinitely\n"
+        "/pause 2h - pause alerts for 2 hours (supports 30m, 1h, 1h30m etc.)\n"
+        "/resume - resume alerts\n"
         "/help - this message"
     )
 
@@ -426,6 +506,8 @@ def build_app():
     app.add_handler(CallbackQueryHandler(on_done, pattern="^done$"))
     app.add_handler(CommandHandler("dose", on_dose))
     app.add_handler(CommandHandler("override", on_override))
+    app.add_handler(CommandHandler("pause", on_pause))
+    app.add_handler(CommandHandler("resume", on_resume))
     app.add_handler(CommandHandler("status", on_status))
     app.add_handler(CommandHandler("help", on_help))
 

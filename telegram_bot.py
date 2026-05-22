@@ -50,6 +50,11 @@ def format_parent_reply(key, **kwargs):
         "please_tell": "Please tell me what Senna needs.",
         "dont_understand": "Sorry, I don't understand. Please reply with what Senna needs.",
         "override_set_no_data": "Override set but no BG data available yet - alert will fire on next poll.",
+        "paused_until": "Alerts paused for {duration}. Send /resume to re-enable.",
+        "paused_indefinite": "Alerts paused. Send /resume to re-enable.",
+        "resumed": "Alerts resumed.",
+        "not_paused": "Alerts are not currently paused.",
+        "pause_invalid": "Invalid duration. Try /pause 2h or /pause 30m or /pause 1h30m.",
     }
     return strings[key].format(**kwargs)
 
@@ -85,5 +90,18 @@ def format_status_message(state, data, cooldown_remaining_seconds=None):
         lines.append(f"Override: {ov['action']} (by {ov['triggered_by']})")
     else:
         lines.append("Override: none")
+
+    if state.get("paused"):
+        pause_until = state.get("pause_until")
+        if pause_until is not None:
+            import time
+            remaining = max(0, int(pause_until - time.time()))
+            m = remaining // 60
+            s = remaining % 60
+            lines.append(f"Alerts: PAUSED ({m}m {s}s remaining)")
+        else:
+            lines.append("Alerts: PAUSED (manual resume required)")
+    else:
+        lines.append("Alerts: active")
 
     return "\n".join(lines)
