@@ -154,7 +154,7 @@ async def bg_poll(context):
         # Same action - check for repeat
         if state["active_action"] and state["last_alert_time"]:
             elapsed = now - state["last_alert_time"]
-            if elapsed >= 600:
+            if elapsed >= 300:
                 log.info(
                     f"Repeat alert for {state['active_action']} "
                     f"({elapsed:.0f}s since last alert)"
@@ -218,7 +218,16 @@ async def on_done(update, context):
         log.warning("Failed to remove Done button from alert message", exc_info=True)
 
     # Send confirmation reply in the group
-    reply_text = f"Checked - logged {display_name} ({response_minutes:.0f} min)"
+    action = state["last_alerted_action"] or ""
+    if action.startswith("jb:"):
+        n = action.split(":")[1]
+        reply_text = f"{n}g given by {display_name}"
+    elif action == "water":
+        reply_text = f"Water given by {display_name}"
+    elif action == "juicebox":
+        reply_text = f"Juice box given by {display_name}"
+    else:
+        reply_text = f"Done - {display_name}"
     try:
         await context.bot.send_message(
             chat_id=config.TELEGRAM_GROUP_ID,

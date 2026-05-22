@@ -8,21 +8,24 @@ def format_alert_message(action, data, *, is_repeat=False, is_override=False):
     delta = data["delta"]
     previous_bgs = data.get("previous_bgs", [])
 
-    suffix = ""
-    if is_override:
-        suffix += " (manual)"
-    if is_repeat:
-        suffix += " (repeat)"
-
     if action.startswith("jb:"):
         n = action.split(":")[1]
-        header = f"🍬 Senna needs {n}g{suffix}\n({n}x jellybeans)"
+        label = f"[Low BG] Give {n}x 🍬"
+        body_line = f"Senna needs {n}g"
     elif action == "water":
-        header = f"💧 Senna needs water{suffix}"
+        label = "[High BG] Drink 💧"
+        body_line = "Senna needs water"
     elif action == "juicebox":
-        header = f"🧃 Senna needs juice box - urgent{suffix}"
+        label = "[URGENT] Give 🧃"
+        body_line = "Senna needs juice box immediately"
     else:
-        header = f"Alert: {action}{suffix}"
+        label = f"[Alert] {action}"
+        body_line = action
+
+    if is_repeat:
+        header = f"{label}\n(Repeat request)"
+    else:
+        header = label
 
     prev_parts = []
     for i in range(3):
@@ -35,7 +38,7 @@ def format_alert_message(action, data, *, is_repeat=False, is_override=False):
         f"Previous: {prev_str}"
     )
 
-    return f"{header}\n\n{body}"
+    return f"{header}\n\n{body_line}\n\n{body}"
 
 
 def format_status_message(state, data, cooldown_remaining_seconds=None):
