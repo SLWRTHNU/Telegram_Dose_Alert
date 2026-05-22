@@ -10,6 +10,7 @@ import asyncio
 import logging
 import time
 
+import anthropic
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler
 
@@ -247,6 +248,69 @@ async def on_done(update, context):
 
 
 # ---------------------------------------------------------------------------
+# Natural language intent parsing
+# ---------------------------------------------------------------------------
+
+async def parse_dose_intent(text):
+    """Use Claude API to parse a natural language dose request.
+
+    Returns a valid action string: jb:2, jb:3, jb:4, jb:5, water, juicebox, clear
+    Returns None if intent cannot be determined confidently.
+    """
+    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+
+    system_prompt = """You are a parser for a medical glucose management system for a diabetic child named Senna.
+Your job is to parse natural language requests from parents into one of these exact action codes:
+- jb:2 (give 2 jellybeans / 2g)
+- jb:3 (give 3 jellybeans / 3g)
+- jb:4 (give 4 jellybeans / 4g)
+- jb:5 (give 5 jellybeans / 5g)
+- water (give water, for high blood sugar)
+- juicebox (give juice box, urgent low blood sugar)
+- clear (cancel/clear the current override)
+
+Requests may be in English or French.
+Respond with ONLY the action code and nothing else.
+If you cannot confidently determine the intent, respond with UNKNOWN."""
+
+    try:
+        response = await asyncio.to_thread(
+            lambda: client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=10,
+                system=system_prompt,
+                messages=[{"role": "user", "content": text}],
+            )
+        )
+        result = response.content[0].text.strip()
+        valid = {"jb:2", "jb:3", "jb:4", "jb:5", "water", "juicebox", "clear"}
+        return result if result in valid else None
+    except Exception:
+        log.error("Failed to parse dose intent via Anthropic API", exc_info=True)
+        return None
+
+
+async def trigger_immediate_alert(bot, action, username):
+    """Set an override and immediately send an alert using last known BG data."""
+    state["override"] = {"action": action, "triggered_by": username}
+
+    data = state["last_bg_data"]
+    if data is None:
+        log.warning("Immediate alert requested but no BG data available yet")
+        return False
+
+    # Cancel cooldown - parent override always goes through
+    state["cooldown_until"] = None
+
+    try:
+        await _send_alert(bot, action, data)
+        return True
+    except Exception:
+        log.error(f"Failed to send immediate alert for action={action}", exc_info=True)
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Parent private chat commands
 # ---------------------------------------------------------------------------
 
@@ -254,36 +318,81 @@ def _is_parent(update):
     return update.effective_chat.id in config.TELEGRAM_PARENT_IDS
 
 
-async def on_override(update, context):
-    """Handle /override <action|clear> from authorized parents."""
+async def on_dose(update, context):
+    """Handle /dose <natural language> from authorized parents."""
     if not _is_parent(update):
         return
 
-    args = context.args
-    if not args:
-        await update.message.reply_text(
-            "Usage: /override <action> or /override clear\n"
-            "Valid actions: water, jb:2, jb:3, jb:4, jb:5, juicebox"
-        )
+    text = " ".join(context.args).strip()
+    if not text:
+        await update.message.reply_text("Please tell me what Senna needs.")
         return
 
-    arg = args[0].strip().lower()
     user = update.effective_user
     username = user.username or user.first_name or str(user.id)
 
-    if arg == "clear":
+    action = await parse_dose_intent(text)
+
+    if action is None:
+        await update.message.reply_text(
+            "Sorry, I don't understand. Please reply with what Senna needs."
+        )
+        return
+
+    if action == "clear":
         state["override"] = None
+        state["active_action"] = None
         await update.message.reply_text("Override cleared.")
-        log.info(f"Override cleared by {username}")
-    elif arg in _VALID_OVERRIDE_ACTIONS:
-        state["override"] = {"action": arg, "triggered_by": username}
-        await update.message.reply_text(f"Override set: {arg}")
-        log.info(f"Override set to {arg!r} by {username}")
+        log.info(f"Override cleared by {username} via /dose")
+        return
+
+    success = await trigger_immediate_alert(update.get_bot(), action, username)
+    if success:
+        await update.message.reply_text(f"Sending alert: {action}")
     else:
         await update.message.reply_text(
-            f"Unknown action '{arg}'.\n"
-            "Valid: water, jb:2, jb:3, jb:4, jb:5, juicebox"
+            "Override set but no BG data available yet - alert will fire on next poll."
         )
+        state["override"] = {"action": action, "triggered_by": username}
+
+
+async def on_override(update, context):
+    """Handle /override <natural language> from authorized parents.
+    Identical behaviour to /dose."""
+    if not _is_parent(update):
+        return
+
+    text = " ".join(context.args).strip()
+    if not text:
+        await update.message.reply_text("Please tell me what Senna needs.")
+        return
+
+    user = update.effective_user
+    username = user.username or user.first_name or str(user.id)
+
+    action = await parse_dose_intent(text)
+
+    if action is None:
+        await update.message.reply_text(
+            "Sorry, I don't understand. Please reply with what Senna needs."
+        )
+        return
+
+    if action == "clear":
+        state["override"] = None
+        state["active_action"] = None
+        await update.message.reply_text("Override cleared.")
+        log.info(f"Override cleared by {username} via /override")
+        return
+
+    success = await trigger_immediate_alert(update.get_bot(), action, username)
+    if success:
+        await update.message.reply_text(f"Sending alert: {action}")
+    else:
+        await update.message.reply_text(
+            "Override set but no BG data available yet - alert will fire on next poll."
+        )
+        state["override"] = {"action": action, "triggered_by": username}
 
 
 async def on_status(update, context):
@@ -313,8 +422,9 @@ async def on_help(update, context):
 
     await update.message.reply_text(
         "/status - current BG, trend, active action, cooldown and override status\n"
-        "/override <action> - force an action (water, jb:2, jb:3, jb:4, jb:5, juicebox)\n"
-        "/override clear - remove manual override\n"
+        "/dose <what Senna needs> - send a dose request (e.g. /dose 2 jellybeans)\n"
+        "/override <what Senna needs> - same as /dose\n"
+        "/dose clear - cancel current override\n"
         "/help - this message"
     )
 
@@ -327,6 +437,7 @@ def build_app():
     app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
 
     app.add_handler(CallbackQueryHandler(on_done, pattern="^done$"))
+    app.add_handler(CommandHandler("dose", on_dose))
     app.add_handler(CommandHandler("override", on_override))
     app.add_handler(CommandHandler("status", on_status))
     app.add_handler(CommandHandler("help", on_help))

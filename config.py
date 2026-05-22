@@ -20,3 +20,5 @@ TELEGRAM_PARENT_IDS = [
 GOOGLE_CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS_JSON", "credentials.json")
 GOOGLE_SHEET_NAME = os.environ.get("GOOGLE_SHEET_NAME", "Dose Log")
 GOOGLE_DRIVE_FOLDER_ID = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", None)
+
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
