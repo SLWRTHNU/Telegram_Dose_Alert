@@ -7,8 +7,12 @@ and parent override commands.
 """
 
 import asyncio
+import json
 import logging
+import os
+import re
 import time
+from datetime import datetime
 
 import anthropic
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -40,6 +44,7 @@ state = {
     "last_bg_data": None,            # dict | None - most recent fetch result
     "paused": False,                 # bool - whether alerts are paused
     "pause_until": None,             # float | None - unix timestamp to auto-resume
+    "schedule": None,                # loaded on startup
 }
 
 # ---------------------------------------------------------------------------
@@ -52,6 +57,101 @@ _VALID_OVERRIDE_ACTIONS = {"water", "jb:2", "jb:3", "jb:4", "jb:5", "juicebox"}
 
 def _sev(action):
     return _SEVERITY.get(action or "", 0)
+
+
+# ---------------------------------------------------------------------------
+# Schedule helpers
+# ---------------------------------------------------------------------------
+
+_DAY_MAP = {"MON": 0, "TUE": 1, "WED": 2, "THU": 3, "FRI": 4, "SAT": 5, "SUN": 6}
+
+
+def parse_schedule_string(raw):
+    """Parse 'MON-FRI 08:15-15:30' or 'MON,WED,FRI 08:15-15:30'.
+
+    Returns dict with keys: enabled, days, start, end, raw
+    Returns None if parsing fails.
+    """
+    try:
+        parts = raw.strip().upper().split()
+        if len(parts) != 2:
+            return None
+
+        day_part, time_part = parts
+
+        if "-" in day_part:
+            start_day, end_day = day_part.split("-")
+            start_idx = _DAY_MAP[start_day]
+            end_idx = _DAY_MAP[end_day]
+            days = list(range(start_idx, end_idx + 1))
+        elif "," in day_part:
+            days = [_DAY_MAP[d] for d in day_part.split(",")]
+        else:
+            days = [_DAY_MAP[day_part]]
+
+        start_str, end_str = time_part.split("-")
+        start_h, start_m = map(int, start_str.split(":"))
+        end_h, end_m = map(int, end_str.split(":"))
+
+        return {
+            "enabled": True,
+            "days": days,
+            "start": (start_h, start_m),
+            "end": (end_h, end_m),
+            "raw": raw.strip(),
+        }
+    except Exception:
+        log.error(f"Failed to parse schedule string: {raw!r}", exc_info=True)
+        return None
+
+
+def load_schedule():
+    """Load schedule from schedule.json if it exists, else fall back to config.SCHEDULE.
+
+    Returns a parsed schedule dict, or None if scheduling is disabled.
+    """
+    raw = None
+    if os.path.exists(config.SCHEDULE_FILE):
+        try:
+            with open(config.SCHEDULE_FILE) as f:
+                data = json.load(f)
+                raw = data.get("schedule")
+                log.info(f"Loaded schedule from file: {raw}")
+        except Exception:
+            log.error("Failed to load schedule.json - falling back to config", exc_info=True)
+
+    if raw is None:
+        raw = config.SCHEDULE
+
+    if not raw or not raw.strip():
+        return None
+
+    return parse_schedule_string(raw)
+
+
+def save_schedule(raw):
+    """Save schedule string to schedule.json."""
+    try:
+        with open(config.SCHEDULE_FILE, "w") as f:
+            json.dump({"schedule": raw}, f)
+        log.info(f"Schedule saved to file: {raw}")
+    except Exception:
+        log.error("Failed to save schedule.json", exc_info=True)
+        raise
+
+
+def is_within_schedule(schedule):
+    """Return True if current time falls within the schedule window."""
+    if schedule is None:
+        return True
+
+    now = datetime.now()
+    current_day = now.weekday()
+    current_minutes = now.hour * 60 + now.minute
+    start_minutes = schedule["start"][0] * 60 + schedule["start"][1]
+    end_minutes = schedule["end"][0] * 60 + schedule["end"][1]
+
+    return current_day in schedule["days"] and start_minutes <= current_minutes < end_minutes
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +223,10 @@ async def bg_poll(context):
             state["paused"] = False
             state["pause_until"] = None
             log.info("Pause expired - resuming alerts")
+
+    # Check schedule - out-of-schedule silently skips unless manually overridden
+    if not state["paused"] and not is_within_schedule(state["schedule"]):
+        return
 
     # Skip alert logic if paused
     if state["paused"]:
@@ -459,6 +563,105 @@ async def on_resume(update, context):
     log.info(f"Alerts resumed by {username}")
 
 
+async def parse_schedule_intent(text):
+    """Use Claude API to parse a natural language schedule request.
+
+    Returns an internal schedule string like 'MON-FRI 08:15-15:30',
+    'clear' to disable the saved schedule, or None if intent cannot be determined.
+    """
+    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+
+    system_prompt = """You are a parser for a scheduling system. Convert natural language schedule descriptions into a strict format.
+
+Output format: DAY_RANGE HH:MM-HH:MM
+- Days use 3-letter abbreviations: MON TUE WED THU FRI SAT SUN
+- Day range uses hyphen: MON-FRI
+- Non-consecutive days use comma: MON,WED,FRI
+- Times use 24-hour format: 08:15-15:30
+
+Examples:
+- "Monday to Friday 8:15am to 3:30pm" -> MON-FRI 08:15-15:30
+- "weekdays 8h15 à 15h30" -> MON-FRI 08:15-15:30
+- "lundi au vendredi 8h15 à 15h30" -> MON-FRI 08:15-15:30
+- "Monday Wednesday Friday 9am to 4pm" -> MON,WED,FRI 09:00-16:00
+- "every day 7am to 8pm" -> MON-SUN 07:00-20:00
+
+If the user wants to clear/disable the custom schedule, output exactly: clear
+If you cannot parse the request confidently, output exactly: UNKNOWN
+
+Respond with ONLY the output string, nothing else."""
+
+    try:
+        response = await asyncio.to_thread(
+            lambda: client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=20,
+                system=system_prompt,
+                messages=[{"role": "user", "content": text}],
+            )
+        )
+        result = response.content[0].text.strip()
+
+        if result == "clear":
+            return "clear"
+        if result == "UNKNOWN":
+            return None
+
+        parsed = parse_schedule_string(result)
+        return result if parsed is not None else None
+    except Exception:
+        log.error("Failed to parse schedule intent via Anthropic API", exc_info=True)
+        return None
+
+
+async def on_schedule(update, context):
+    """Handle /schedule [natural language] from authorized parents."""
+    if not _is_parent(update):
+        return
+
+    user = update.effective_user
+    username = user.username or user.first_name or str(user.id)
+    text = " ".join(context.args).strip()
+
+    if not text:
+        schedule = state["schedule"]
+        if schedule:
+            await update.message.reply_text(
+                tg.format_parent_reply("schedule_current", schedule=schedule["raw"])
+            )
+        else:
+            await update.message.reply_text(tg.format_parent_reply("schedule_none"))
+        return
+
+    result = await parse_schedule_intent(text)
+
+    if result is None:
+        await update.message.reply_text(tg.format_parent_reply("schedule_invalid"))
+        return
+
+    if result == "clear":
+        try:
+            if os.path.exists(config.SCHEDULE_FILE):
+                os.remove(config.SCHEDULE_FILE)
+            state["schedule"] = parse_schedule_string(config.SCHEDULE) if config.SCHEDULE else None
+            await update.message.reply_text(tg.format_parent_reply("schedule_cleared"))
+            log.info(f"Schedule cleared by {username} - reverted to config default")
+        except Exception:
+            await update.message.reply_text(tg.format_parent_reply("schedule_save_failed"))
+        return
+
+    parsed = parse_schedule_string(result)
+    try:
+        save_schedule(result)
+        state["schedule"] = parsed
+        await update.message.reply_text(
+            tg.format_parent_reply("schedule_set", schedule=result)
+        )
+        log.info(f"Schedule set to {result!r} by {username}")
+    except Exception:
+        await update.message.reply_text(tg.format_parent_reply("schedule_save_failed"))
+
+
 async def on_status(update, context):
     """Handle /status from authorized parents."""
     if not _is_parent(update):
@@ -492,6 +695,9 @@ async def on_help(update, context):
         "/pause - pause all alerts indefinitely\n"
         "/pause 2h - pause alerts for 2 hours (supports 30m, 1h, 1h30m etc.)\n"
         "/resume - resume alerts\n"
+        "/schedule - show current schedule\n"
+        "/schedule <when> - set schedule in plain English or French\n"
+        "/schedule clear - revert to default schedule\n"
         "/help - this message"
     )
 
@@ -508,11 +714,18 @@ def build_app():
     app.add_handler(CommandHandler("override", on_override))
     app.add_handler(CommandHandler("pause", on_pause))
     app.add_handler(CommandHandler("resume", on_resume))
+    app.add_handler(CommandHandler("schedule", on_schedule))
     app.add_handler(CommandHandler("status", on_status))
     app.add_handler(CommandHandler("help", on_help))
 
     # First poll after 10 seconds, then every 5 minutes
     app.job_queue.run_repeating(bg_poll, interval=300, first=10)
+
+    state["schedule"] = load_schedule()
+    if state["schedule"]:
+        log.info(f"Schedule loaded: {state['schedule']['raw']}")
+    else:
+        log.info("No schedule configured - alerts always active")
 
     return app
 

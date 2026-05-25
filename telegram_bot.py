@@ -55,6 +55,12 @@ def format_parent_reply(key, **kwargs):
         "resumed": "Alerts resumed.",
         "not_paused": "Alerts are not currently paused.",
         "pause_invalid": "Invalid duration. Try /pause 2h or /pause 30m or /pause 1h30m.",
+        "schedule_current": "Current schedule: {schedule}",
+        "schedule_none": "No schedule set - alerts always active.",
+        "schedule_set": "Schedule updated: {schedule}",
+        "schedule_cleared": "Schedule cleared - reverted to default.",
+        "schedule_invalid": "Sorry, I couldn't understand that schedule. Try something like: /schedule Monday to Friday 8:15am to 3:30pm",
+        "schedule_save_failed": "Failed to save schedule. Please try again.",
     }
     return strings[key].format(**kwargs)
 

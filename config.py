@@ -22,3 +22,6 @@ GOOGLE_SHEET_NAME = os.environ.get("GOOGLE_SHEET_NAME", "Dose Log")
 GOOGLE_DRIVE_FOLDER_ID = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", None)
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+
+SCHEDULE = os.environ.get("SCHEDULE", "MON-FRI 08:15-15:30")
+SCHEDULE_FILE = os.path.join(os.path.dirname(__file__), "schedule.json")
