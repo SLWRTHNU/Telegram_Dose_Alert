@@ -4,6 +4,32 @@ GROUP_LANG = "fr"
 PARENT_LANG = "en"
 
 
+def _to_12h(hour, minute):
+    """Convert 24h hour/minute to a 12h display string like '8:15am' or '3:30pm'."""
+    period = "am" if hour < 12 else "pm"
+    h = hour % 12
+    if h == 0:
+        h = 12
+    return f"{h}:{minute:02d}{period}"
+
+
+def format_schedule_display(raw):
+    """Convert 'MON-FRI 08:15-15:30' to 'Mon-Fri 8:15am-3:30pm'."""
+    try:
+        parts = raw.strip().upper().split()
+        if len(parts) != 2:
+            return raw
+
+        day_part, time_part = parts
+        start_str, end_str = time_part.split("-")
+        start_h, start_m = map(int, start_str.split(":"))
+        end_h, end_m = map(int, end_str.split(":"))
+
+        return f"{day_part.title()} {_to_12h(start_h, start_m)}-{_to_12h(end_h, end_m)}"
+    except Exception:
+        return raw
+
+
 def format_alert_message(action, data, *, is_repeat=False, is_override=False):
     """Return the full alert message string for the group chat."""
     bg = data["bg"]
@@ -62,6 +88,8 @@ def format_parent_reply(key, **kwargs):
         "schedule_invalid": "Sorry, I couldn't understand that schedule. Try something like: /schedule Monday to Friday 8:15am to 3:30pm",
         "schedule_save_failed": "Failed to save schedule. Please try again.",
     }
+    if "schedule" in kwargs:
+        kwargs = {**kwargs, "schedule": format_schedule_display(kwargs["schedule"])}
     return strings[key].format(**kwargs)
 
 
