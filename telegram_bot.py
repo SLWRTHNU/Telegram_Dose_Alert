@@ -108,6 +108,14 @@ def format_status_message(state, data, cooldown_remaining_seconds=None):
     """Return a status summary string for the /status command."""
     lines = [
         f"BG: {data['bg']:.1f} mmol/L {data['trend_arrow']}",
+    ]
+
+    import time as _time
+    age_seconds = int(_time.time() - data.get("timestamp", _time.time()))
+    age_minutes = age_seconds // 60
+    lines.append(f"Age: {age_minutes} min")
+
+    lines += [
         f"Delta: {data['delta']:+.1f} mmol/L",
         f"Active action: {state['active_action'] or 'none'}",
     ]
@@ -137,6 +145,12 @@ def format_status_message(state, data, cooldown_remaining_seconds=None):
             lines.append("Alerts: PAUSED (manual resume required)")
     else:
         lines.append("Alerts: active")
+
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    import config as _config
+    now_local = datetime.now(tz=ZoneInfo(_config.TIMEZONE))
+    lines.append(f"Time: {now_local.strftime('%-I:%M %p')}")
 
     schedule = state.get("schedule")
     if schedule:
