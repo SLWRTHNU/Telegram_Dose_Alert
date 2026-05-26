@@ -138,4 +138,10 @@ def format_status_message(state, data, cooldown_remaining_seconds=None):
     else:
         lines.append("Alerts: active")
 
+    schedule = state.get("schedule")
+    if schedule:
+        lines.append(f"Schedule: {format_schedule_display(schedule['raw'])}")
+    else:
+        lines.append("Schedule: always active")
+
     return "\n".join(lines)
