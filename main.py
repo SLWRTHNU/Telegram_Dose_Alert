@@ -13,6 +13,7 @@ import os
 import re
 import time
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import anthropic
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -139,7 +140,7 @@ def is_within_schedule(schedule):
     if schedule is None:
         return True
 
-    now = datetime.now()
+    now = datetime.now(tz=ZoneInfo(config.TIMEZONE))
     current_day = now.weekday()
     current_minutes = now.hour * 60 + now.minute
     start_minutes = schedule["start"][0] * 60 + schedule["start"][1]
