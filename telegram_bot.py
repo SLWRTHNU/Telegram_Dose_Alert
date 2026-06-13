@@ -87,6 +87,7 @@ def format_parent_reply(key, **kwargs):
         "schedule_cleared": "Schedule cleared - reverted to default.",
         "schedule_invalid": "Sorry, I couldn't understand that schedule. Try something like: /schedule Monday to Friday 8:15am to 3:30pm",
         "schedule_save_failed": "Failed to save schedule. Please try again.",
+        "override_not_actioned": "Manual dose request ({action}) was not actioned within 5 minutes.",
     }
     if "schedule" in kwargs:
         kwargs = {**kwargs, "schedule": format_schedule_display(kwargs["schedule"])}

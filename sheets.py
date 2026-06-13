@@ -128,3 +128,19 @@ def acknowledge_alert(row_index, username, ack_time, response_minutes, cooldown_
     except Exception:
         _invalidate_cache()
         raise
+
+
+def mark_not_actioned(row_index):
+    """Mark an alert row as not actioned (sets Cooldown Triggered column to 'no')."""
+    try:
+        sheet = _get_sheet()
+    except Exception:
+        _invalidate_cache()
+        raise
+
+    try:
+        sheet.update_cell(row_index, 14, "no")
+        log.info(f"Marked sheet row {row_index} as not actioned")
+    except Exception:
+        _invalidate_cache()
+        raise

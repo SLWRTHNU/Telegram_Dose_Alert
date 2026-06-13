@@ -50,13 +50,7 @@ state = {
 # ---------------------------------------------------------------------------
 # Severity ordering for escalation checks
 # ---------------------------------------------------------------------------
-_SEVERITY = {"": 0, "water": 1, "jb:2": 2, "jb:3": 3, "jb:4": 4, "jb:5": 5, "juicebox": 6}
-
 _VALID_OVERRIDE_ACTIONS = {"water", "jb:2", "jb:3", "jb:4", "jb:5", "juicebox"}
-
-
-def _sev(action):
-    return _SEVERITY.get(action or "", 0)
 
 
 # ---------------------------------------------------------------------------
@@ -246,47 +240,54 @@ async def bg_poll(context):
     )
 
     if cooldown_active:
-        if _sev(effective_action) > _sev(state["last_alerted_action"]):
-            log.info(
-                f"Cooldown broken by escalation: "
-                f"{state['last_alerted_action']} -> {effective_action}"
-            )
-            state["cooldown_until"] = None
-            # Fall through to send new alert
-        else:
-            return  # Stay quiet during cooldown
+        return
 
-    if effective_action != state["active_action"]:
-        if effective_action:
+    # Delete existing unacknowledged alert if present
+    if state["active_alert_message_id"] is not None:
+        was_override = state["override"] is not None
+
+        try:
+            await context.bot.delete_message(
+                chat_id=config.TELEGRAM_GROUP_ID,
+                message_id=state["active_alert_message_id"],
+            )
+            log.info(f"Deleted stale alert msg_id={state['active_alert_message_id']}")
+        except Exception:
+            log.warning("Failed to delete stale alert message", exc_info=True)
+
+        if state["current_sheet_row"]:
             try:
-                await _send_alert(context.bot, effective_action, data)
+                await asyncio.to_thread(
+                    sheets.mark_not_actioned,
+                    state["current_sheet_row"],
+                )
             except Exception:
-                log.error(
-                    f"Failed to send alert for action={effective_action}", exc_info=True
-                )
-        else:
-            if state["active_action"]:
-                log.info(
-                    f"Action '{state['active_action']}' resolved without acknowledgement"
-                )
-            state["active_action"] = None
-            state["active_alert_message_id"] = None
-    else:
-        # Same action - check for repeat
-        if state["active_action"] and state["last_alert_time"]:
-            elapsed = now - state["last_alert_time"]
-            if elapsed >= 300:
-                log.info(
-                    f"Repeat alert for {state['active_action']} "
-                    f"({elapsed:.0f}s since last alert)"
-                )
-                try:
-                    await _send_alert(context.bot, effective_action, data, is_repeat=True)
-                except Exception:
-                    log.error(
-                        f"Failed to send repeat alert for action={effective_action}",
-                        exc_info=True,
+                log.error("Failed to mark alert as not actioned in sheet", exc_info=True)
+
+        if was_override:
+            action_str = state["last_alerted_action"] or "unknown"
+            try:
+                for parent_id in config.TELEGRAM_PARENT_IDS:
+                    await context.bot.send_message(
+                        chat_id=parent_id,
+                        text=tg.format_parent_reply("override_not_actioned", action=action_str),
                     )
+            except Exception:
+                log.error("Failed to notify parents of unactioned override", exc_info=True)
+
+        state["active_action"] = None
+        state["active_alert_message_id"] = None
+        state["current_sheet_row"] = None
+        state["override"] = None
+
+    # Send fresh alert if action needed
+    if effective_action:
+        try:
+            await _send_alert(context.bot, effective_action, data)
+        except Exception:
+            log.error(
+                f"Failed to send alert for action={effective_action}", exc_info=True
+            )
 
 
 # ---------------------------------------------------------------------------
