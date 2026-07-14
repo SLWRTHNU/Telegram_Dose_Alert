@@ -43,6 +43,8 @@ state = {
     "current_sheet_row": None,       # int | None - 1-based sheet row of live alert
     "last_alert_time": None,         # float | None - when last alert was sent
     "last_bg_data": None,            # dict | None - most recent fetch result
+    "last_basal_time": None,         # float | None - unix ts of most recent basal treatment
+    "basal_alerts_sent": 0,          # int - gap-threshold alerts sent since last basal
     "paused": False,                 # bool - whether alerts are paused
     "pause_until": None,             # float | None - unix timestamp to auto-resume
     "schedule": None,                # loaded on startup
@@ -290,6 +292,38 @@ async def bg_poll(context):
                 f"Failed to send alert for action={effective_action}", exc_info=True
             )
 
+async def basal_poll(context):
+    """Check time since last basal treatment and alert if gap exceeds threshold."""
+    try:
+        last_basal = await asyncio.to_thread(nightscout.fetch_last_basal_time)
+    except Exception:
+        log.error("Failed to fetch basal data from Nightscout", exc_info=True)
+        return
+
+    if last_basal is None:
+        log.warning("No basal treatments found in Nightscout - skipping gap check")
+        return
+
+    if last_basal != state["last_basal_time"]:
+        state["last_basal_time"] = last_basal
+        state["basal_alerts_sent"] = 0
+        return
+
+    gap_minutes = (time.time() - last_basal) / 60
+    threshold = config.BASAL_GAP_ALERT_MINUTES
+    expected_alerts = int(gap_minutes // threshold)
+
+    if expected_alerts > state["basal_alerts_sent"]:
+        elapsed = expected_alerts * threshold
+        try:
+            await context.bot.send_message(
+                chat_id=config.TELEGRAM_GROUP_ID,
+                text=f"⚠️ No basal for {elapsed} minutes",
+            )
+            state["basal_alerts_sent"] = expected_alerts
+            log.info(f"Basal gap alert sent: {elapsed} min")
+        except Exception:
+            log.error("Failed to send basal gap alert", exc_info=True)
 
 # ---------------------------------------------------------------------------
 # Inline keyboard - Done button
@@ -722,6 +756,7 @@ def build_app():
 
     # First poll after 10 seconds, then every 5 minutes
     app.job_queue.run_repeating(bg_poll, interval=300, first=10)
+    app.job_queue.run_repeating(basal_poll, interval=300, first=20)
 
     state["schedule"] = load_schedule()
     if state["schedule"]:
