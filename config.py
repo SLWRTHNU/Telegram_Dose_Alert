@@ -27,3 +27,4 @@ SCHEDULE = os.environ.get("SCHEDULE", "MON-FRI 08:15-15:30")
 SCHEDULE_FILE = os.path.join(os.path.dirname(__file__), "schedule.json")
 
 TIMEZONE = os.environ.get("TIMEZONE", "America/Toronto")
+BASAL_GAP_ALERT_MINUTES = int(os.environ.get("BASAL_GAP_ALERT_MINUTES", "10"))
