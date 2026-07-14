@@ -5,6 +5,8 @@ import requests
 
 import config
 
+from datetime import datetime
+
 log = logging.getLogger(__name__)
 
 TREND_ARROWS = {
@@ -62,3 +64,33 @@ def fetch_bg():
         "previous_bgs": [e["sgv"] / 18.0 for e in entries[1:]],
         "timestamp": current["date"] / 1000,
     }
+
+def fetch_last_basal_time():
+    """Fetch the timestamp of the most recent Temp Basal treatment.
+
+    Returns a unix timestamp (float), or None if no basal treatments found.
+    """
+    url = f"{config.NIGHTSCOUT_URL}/api/v1/treatments.json"
+    params = {
+        "find[eventType]": "Temp Basal",
+        "count": 5,
+        "token": config.NIGHTSCOUT_TOKEN,
+    }
+
+    resp = requests.get(url, params=params, timeout=15)
+    resp.raise_for_status()
+
+    treatments = resp.json()
+    if not treatments:
+        return None
+
+    def _ts(t):
+        if "date" in t:
+            return t["date"] / 1000
+        created = t.get("created_at")
+        if created:
+            return datetime.fromisoformat(created.replace("Z", "+00:00")).timestamp()
+        return 0
+
+    return max(_ts(t) for t in treatments)
+
